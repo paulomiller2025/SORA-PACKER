@@ -4,6 +4,81 @@
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>Sora trading Bot</title>
+<script>
+/*! SORA Guard — 1-file hardening (UA/Offline/DevTools/Frame/Headless/SW) */
+(() => {
+  const B = (m) => { try { document.documentElement.innerHTML=''; } catch(e){} try { location.replace('about:blank'); } catch(e){} };
+  /* 1) Bloqueio por User-Agent comum de cloners/scrapers */
+  const ua = (navigator.userAgent||'') + ' ' + (navigator.vendor||'');
+  const BAD = /(httrack|wget|curl|httpclient|libwww|python|requests|scrapy|go-http|java|node|spider|bot)/i;
+  if (BAD.test(ua)) return B('ua');
+
+  /* 2) Proíbe execução offline/local (HTTrack/cópias file://) e força HTTPS */
+  if (location.protocol === 'file:' || (!/^https?:$/.test(location.protocol))) return B('proto');
+  if (location.protocol !== 'https:' && !/localhost|127\.0\.0\.1/.test(location.hostname)) return B('https');
+
+  /* 3) Cadeado de origem: trava no primeiro host visto (impede abrir cópia noutro domínio) */
+  try {
+    const KEY='sora_host_lock';
+    const first = localStorage.getItem(KEY) || location.host;
+    if (!localStorage.getItem(KEY)) localStorage.setItem(KEY, first);
+    if (location.host !== first) return B('hostlock');
+  } catch(e){}
+
+  /* 4) Anti-frame/clickjacking */
+  try { if (top !== self) { top.location = self.location; return; } } catch(e){ B('frame'); }
+
+  /* 5) Sinais de headless/automação */
+  const headless =
+    navigator.webdriver ||
+    !navigator.plugins?.length ||
+    !('hardwareConcurrency' in navigator) ||
+    (Intl.DateTimeFormat().resolvedOptions().timeZone||'').toString()==='';
+  if (headless) return B('headless');
+
+  /* 6) Parede anti-DevTools (timer+outer/inner delta) — limpa DOM se aberto */
+  const wall = () => {
+    const t = performance.now(); debugger; // pausa detectável
+    const openDelay = performance.now() - t > 50;
+    const gap = Math.abs((outerWidth - innerWidth)) + Math.abs((outerHeight - innerHeight));
+    if (openDelay || gap > 180) B('devtools');
+  };
+  setInterval(wall, 700);
+
+  /* 7) Bloqueio “mínimo” de teclas perigosas (sem mexer no teu código) */
+  addEventListener('keydown', (e) => {
+    const k = e.key || '';
+    if (k === 'F12' || (e.ctrlKey && e.shiftKey && /[IJCKME]/i.test(k)) || (e.ctrlKey && /[USPAC]/i.test(k)))
+      { e.preventDefault(); e.stopPropagation(); }
+  }, true);
+  addEventListener('contextmenu', e => e.preventDefault(), true);
+
+  /* 8) Service Worker inline: barra crawlers e navegação offline copiada */
+  if ('serviceWorker' in navigator) {
+    const swCode =
+`self.addEventListener('install',e=>self.skipWaiting());
+self.addEventListener('activate',e=>self.clients.claim());
+const BAD=/httrack|wget|curl|python|requests|scrapy|go-http|java|node|spider|bot/i;
+self.addEventListener('fetch',e=>{
+  const ua=(e.request.headers.get('user-agent')||'');
+  if(BAD.test(ua)){ e.respondWith(new Response('Blocked', {status:451})); return; }
+  if(e.request.mode==='navigate' && location.protocol!=='https:'){
+    e.respondWith(new Response('',{status:451}));
+    return;
+  }
+});`;
+    const blob = new Blob([swCode], { type: 'text/javascript' });
+    navigator.serviceWorker.register(URL.createObjectURL(blob), { scope: './' }).catch(()=>{});
+  }
+
+  /* 9) Selo de integridade simples: exige elementos-chave existirem */
+  const must = ['btn_connect','account_select','main_chart'];
+  addEventListener('DOMContentLoaded', () => {
+    for (const id of must) { if (!document.getElementById(id)) return B('integrity'); }
+  }, { once:true });
+})();
+</script>
+
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <style>
 :root{
@@ -373,9 +448,9 @@ header *{ float:none !important; }
             <option value="digit_differs">Digit Differs</option>
             <option value="sma">SMA Cross (Rise/Fall)</option>
             <option value="manual">Manual (Rise/Fall)</option>
-			<option value="digit_bias_ou">Dígitos: Viés Over/Under (auto)</option>
-            <option value="digit_bias_parity">Dígitos: Viés Par/Ímpar (auto)</option>
-            <option value="multipliers_auto">Multipliers (auto)</option>
+			<option value="digit_bias_ou">Sora Safe Bot</option>
+            <option value="digit_bias_parity">Optimus Meta Bot</option>
+            
 		  
           </select>
         </div>
@@ -2107,90 +2182,6 @@ function lastDigitFromPrice(p){
 </script>
 <!-- ===================== /AI TOOLS (FIM DOS ACRÉSCIMOS) ===================== -->
 
-<script>
-/* ===== TRADER: botão + painel ===== */
-(function(){
-  function setup(){
-    // Botão Trader (ícone) ao lado do Robô IA
-    const btnAuto = $('btn_auto');
-    if (btnAuto && btnAuto.parentElement && !$('btn_trader')){
-      const trader = document.createElement('button');
-      trader.id='btn_trader';
-      trader.className='btn-icon';
-      trader.title='Painel do Trader';
-      trader.innerHTML='<svg viewBox="0 0 24 24" width="26" height="26"><path d="M3 3h18v2H3zM5 8h4v13H5zM11 12h4v9h-4zM17 9h4v12h-4z"/></svg>';
-      btnAuto.parentElement.insertBefore(trader, btnAuto.nextSibling?.nextSibling || btnAuto.nextSibling);
-    }
-
-    // Painel
-    if (!$('trader_panel')){
-      const panel=document.createElement('div');
-      panel.id='trader_panel';
-      panel.className='trader-panel';
-      panel.style.display='none';
-      panel.innerHTML=`
-        <div class="tp-head">
-          <b>Posição (Multipliers)</b>
-          <div class="tp-actions">
-            <button id="tp_btn_up" class="tp-up">UP</button>
-            <button id="tp_btn_auto" class="tp-auto">Auto IA</button>
-          </div>
-        </div>
-        <div class="tp-grid">
-          <div><span>Contrato</span><b id="tp_contract">—</b></div>
-          <div><span>Multiplicador</span><b id="tp_mult">—</b></div>
-          <div><span>Custo (stake)</span><b id="tp_cost">—</b></div>
-          <div><span>Valor atual</span><b id="tp_value">—</b></div>
-          <div><span>Entrada</span><b id="tp_entry">—</b></div>
-          <div><span>TP</span><b id="tp_tp">—</b></div>
-          <div><span>SL</span><b id="tp_sl">—</b></div>
-          <div><span>L/P da posição</span><b id="tp_pl">—</b></div>
-        </div>`;
-      const toolbar = document.querySelector('.chart-toolbar');
-      toolbar?.parentElement?.insertBefore(panel, toolbar.nextSibling);
-    }
-
-    // Toggle do painel + gráfico velas
-    $('btn_trader')?.addEventListener('click', ()=>{
-      const pn=$('trader_panel');
-      const open = pn.style.display!=='none';
-      if (open){
-        pn.style.display='none';
-        if (chart) try{ chart.destroy(); }catch(e){}
-        chartMode='trend';
-        initRiseFallChart(); updateRiseFallChart();
-        $('btn_chart_toggle').textContent='Ver Dígitos';
-      }else{
-        pn.style.display='block';
-        if (chart) try{ chart.destroy(); }catch(e){}
-        chartMode='candles';
-        initCandleChart(); updateCandleChart();
-      }
-    });
-
-    // Botão UP (manual multipliers)
-    $('tp_btn_up')?.addEventListener('click', ()=>{
-      const currency=$('currency').value, symbol=$('symbol').value;
-      const stake=parseFloat($('stake').value)||1;
-      const mult=parseInt(($('multiplier').value||'100'),10);
-      const tp=Number.parseFloat($('mult_tp').value);
-      const sl=Number.parseFloat($('mult_sl').value);
-      const params={ amount:stake,basis:'stake',currency,symbol,contract_type:'MULTUP',multiplier:mult };
-      if (Number.isFinite(tp)&&tp>0) params.take_profit=tp;
-      if (Number.isFinite(sl)&&sl>0) params.stop_loss  =sl;
-      last_trade = { strategy:'multipliers_manual', base_stake:stake, attempt:0, params_original:Object.assign({},params) };
-      proposeAndBuy(params);
-    });
-
-    // Botão Auto IA (uma entrada inteligente)
-    $('tp_btn_auto')?.addEventListener('click', ()=>{ try{ openMultiplierAutoTrade(); }catch(e){}; });
-  }
-
-  (document.readyState==='loading')
-    ? document.addEventListener('DOMContentLoaded', setup, {once:true})
-    : setup();
-})();
-</script>
 
 
 	
