@@ -4,6 +4,42 @@
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>Sora trading Bot</title>
+
+<script>
+/*! SORA HeartGate — 1-file remote kill-switch */
+(() => {
+  const ABORT = () => { try{document.documentElement.innerHTML='';}catch(e){} try{location.replace('about:blank');}catch(e){} };
+  // 0) Esconde o conteúdo até validar o “ping”
+  const root = document.documentElement; const prev = root.style.display; root.style.display = 'none';
+
+  // 1) Fail-fast: file://, sem https (fora localhost) ou sem JS
+  if (location.protocol==='file:' || (location.protocol!=='https:' && !/^(localhost|127\.0\.0\.1)$/.test(location.hostname))) return ABORT();
+
+  // 2) Host-lock suave (não substitui o anterior)
+  try {
+    const KEY='sora_host_gate'; const first=localStorage.getItem(KEY)||location.host;
+    if(!localStorage.getItem(KEY)) localStorage.setItem(KEY, first);
+    if(location.host!==first) return ABORT();
+  } catch(e){}
+
+  // 3) Heartbeat remoto (troque a URL abaixo pelo teu domínio/ficheiro)
+  const GATE_URL = 'https://sora-trading.pages.dev/.well-known/sora-gate.txt';
+
+  // 4) Timeout curto: clones/offline falham e morrem
+  const T = setTimeout(ABORT, 1800);
+
+  fetch(GATE_URL, { cache: 'no-store', mode: 'cors', credentials: 'omit' })
+    .then(r => r.ok ? r.text() : Promise.reject())
+    .then(txt => {
+      if (typeof txt !== 'string' || txt.trim() !== 'OK') throw new Error('bad token');
+      // 5) Passou no gate → mostra a página
+      clearTimeout(T); root.style.display = prev || '';
+    })
+    .catch(() => ABORT());
+})();
+</script>
+
+
 <script>
 /*! SORA Guard — 1-file hardening (UA/Offline/DevTools/Frame/Headless/SW) */
 (() => {
